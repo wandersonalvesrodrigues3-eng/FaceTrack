@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>FaceTrack V3.2</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00D9FF">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui}
+body{background:#0a0a0f;color:#fff;min-height:100vh;display:flex;flex-direction:column}
+header{padding:16px 20px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:900;font-size:22px} .logo span{color:#00D9FF}
+#status{font-size:11px;background:#1a1a25;padding:6px 12px;border-radius:20px;color:#aaa;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:14px}
+.brain{font-size:56px;animation:pulse 1.5s infinite} @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+#log{background:#15151f;border:1px solid #222;border-radius:16px;padding:12px 16px;font-size:13px;width:100%;max-width:500px;color:#aaa;word-break:break-word}
+#progressWrap{width:100%;max-width:500px;height:8px;background:#1a1a25;border-radius:10px;overflow:hidden;display:none}
+#progressBar{height:100%;width:0%;background:#00D9FF;transition:width .3s}
+#videoWrap{position:relative;width:100%;max-width:500px;aspect-ratio:3/4;background:#000;border-radius:24px;overflow:hidden;display:none}
+#video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.card{width:100%;max-width:500px;background:#15151f;border:1px solid #222;border-radius:20px;padding:16px;display:none;gap:12px}
+.card.show{display:flex;flex-direction:column}
+.row{display:flex;justify-content:space-between}
+.controls{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:500px;margin:0 auto;width:100%}
+.btn{border:0;border-radius:20px;padding:16px;font-weight:800;font-size:15px;cursor:pointer}
+.btn-primary{background:#00D9FF;color:#000}
+.btn-ghost{background:#1a1a25;color:#fff;border:1px solid #2a2a3a}
+.btn-full{grid-column:1/-1}
+</style>
+</head>
+<body>
+<header><div class="logo">FACE<span>TRACK</span> V3.2</div><div id="status">Carregando...</div></header>
+<div id="main">
+<div id="log">Tentando conectar aos servidores da IA...</div>
+<div id="progressWrap"><div id="progressBar"></div></div>
+<div id="brainBox" style="text-align:center">
+<div class="brain">🧠</div>
+<h2 id="title">Conectando...</h2>
+<p id="subtitle" style="color:#777;font-size:13px;margin-top:8px">Tentando CDN 1/3...</p>
+</div>
+<div id="videoWrap"><video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas></div>
+<div id="card" class="card">
+<div class="row"><span>Idade</span><b id="age">-</b></div>
+<div class="row"><span>Gênero</span><b id="gender">-</b></div>
+<div class="row"><span>Confiança</span><b id="conf">-</b></div>
+<div class="row"><span>Emoção</span><b id="emo">-</b></div>
+</div>
+<button id="retryBtn" class="btn btn-ghost" style="display:none;max-width:500px;width:100%" onclick="location.reload()">🔄 Tentar novamente</button>
+</div>
+<div class="controls">
+<button class="btn btn-primary" id="startBtn">▶ INICIAR</button>
+<button class="btn btn-ghost" id="flipBtn">🔄 Virar</button>
+<button class="btn btn-ghost btn-full" id="galleryBtn">🖼️ Analisar foto da galeria</button>
+<input type="file" id="fileInput" accept="image/*" style="display:none">
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const log = m => { $('log').textContent=m; console.log(m); }
+const status = m => { $('status').textContent=m; }
+const title = m => { $('title').textContent=m; }
+const subtitle = m => { $('subtitle').textContent=m; }
+let human, stream, facing='user';
+
+const cdns = [
+  'https://cdn.jsdelivr.net/npm/@vladmandic/human@3.2.1/dist/human.js',
+  'https://unpkg.com/@vladmandic/human@3.2.1/dist/human.js',
+  'https://cdn.skypack.dev/@vladmandic/human@3.2.1'
+];
+
+function loadScript(url){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src=url; s.async=true;
+    s.onload=()=>resolve(url);
+    s.onerror=()=>reject(new Error('Falha '+url));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadHumanWithFallback(){
+  $('progressWrap').style.display='block';
+  for(let i=0;i<cdns.length;i++){
+    const url=cdns[i];
+    try{
+      subtitle(`Tentando CDN ${i+1}/3...`);
+      log(`Baixando engine de ${url.split('/')[2]}...`);
+      status(`CDN ${i+1}/3`);
+      $('progressBar').style.width=(20+i*20)+'%';
+      await loadScript(url);
+      // check if loaded
+      if(typeof Human!=='undefined' || window.Human){
+        log(`✅ Engine baixada via CDN ${i+1}`);
+        return true;
+      }
+    }catch(e){
+      console.warn('CDN falhou',url,e);
+      log(`CDN ${i+1} falhou, tentando próximo...`);
+    }
+  }
+  throw new Error('Todos os CDNs falharam - verifique DNS/AdBlock');
+}
+
+async function init(){
+  try{
+    await loadHumanWithFallback();
+    if(typeof Human==='undefined' && window.Human) window.Human = window.Human;
+    const HumanClass = window.Human.Human || window.Human;
+    const config = {
+      backend:'webgl',
+      modelBasePath:'https://cdn.jsdelivr.net/npm/@vladmandic/human@3.2.1/models/',
+      filter:{enabled:true},
+      face:{
+        enabled:true,
+        detector:{rotation:true,maxDetected:1},
+        mesh:{enabled:false},
+        description:{enabled:true},
+        emotion:{enabled:true},
+        age:{enabled:true},
+        gender:{enabled:true}
+      },
+      body:{enabled:false}, hand:{enabled:false}, object:{enabled:false}
+    };
+    human = new HumanClass(config);
+    log('Baixando modelos ~12MB (só na 1ª vez)...');
+    status('Baixando modelos...');
+    $('progressBar').style.width='60%';
+    await human.load();
+    $('progressBar').style.width='90%';
+    await human.warmup();
+    $('progressBar').style.width='100%';
+    setTimeout(()=>{$('progressWrap').style.display='none';},500);
+    log('✅ V3.2 Pronto! Clique em INICIAR - agora funciona offline');
+    status('✅ Pronto');
+    title('IA Pronta! Offline');
+    subtitle('Clique em INICIAR');
+  }catch(e){
+    console.error(e);
+    log('❌ '+e.message+' - Desative AdBlock ou tente no WiFi');
+    status('Erro');
+    title('Falha no download');
+    subtitle('Tente: 1) Desativar AdBlock 2) Usar Chrome sem extensões 3) WiFi');
+    $('retryBtn').style.display='block';
+    $('progressWrap').style.display='none';
+  }
+}
+
+async function startCam(){
+  try{
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    $('videoWrap').style.display='block';
+    $('card').classList.add('show');
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:720}},audio:false});
+    $('video').srcObject=stream;
+    await $('video').play();
+    detectLoop();
+  }catch(e){ log('Erro câmera: '+e.message); }
+}
+
+async function detectLoop(){
+  if(!$('video').srcObject) return;
+  const result = await human.detect($('video'));
+  const canvas=$('canvas'); canvas.width=$('video').videoWidth; canvas.height=$('video').videoHeight;
+  const ctx=canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(result.face && result.face.length>0){
+    human.draw.face(canvas,result.face);
+    const f=result.face[0];
+    $('age').textContent = f.age ? Math.round(f.age)+' anos' : '-';
+    $('gender').textContent = f.gender ? f.gender+' ('+Math.round((f.genderScore||0)*100)+'%)' : '-';
+    $('conf').textContent = f.faceScore ? Math.round(f.faceScore*100)+'%' : '-';
+    $('emo').textContent = f.emotion ? f.emotion[0].emotion+' '+Math.round(f.emotion[0].score*100)+'%' : '-';
+  }
+  requestAnimationFrame(detectLoop);
+}
+
+$('startBtn').onclick = async()=>{ if(!human) await init(); await startCam(); };
+$('flipBtn').onclick = ()=>{ facing=facing==='user'?'environment':'user'; if(stream) startCam(); };
+$('galleryBtn').onclick=()=>$('fileInput').click();
+$('fileInput').onchange=async(e)=>{
+  const file=e.target.files[0]; if(!file) return;
+  const img=new Image(); img.src=URL.createObjectURL(file); await img.decode();
+  const res=await human.detect(img);
+  $('card').classList.add('show');
+  if(res.face && res.face[0]){
+    const f=res.face[0];
+    $('age').textContent=Math.round(f.age)+' anos';
+    $('gender').textContent=f.gender;
+    $('conf').textContent=Math.round(f.faceScore*100)+'%';
+    $('emo').textContent=f.emotion[0].emotion;
+    log('Foto analisada offline!');
+  } else log('Nenhum rosto encontrado');
+};
+
+init();
+</script>
+</body>
+</html>
