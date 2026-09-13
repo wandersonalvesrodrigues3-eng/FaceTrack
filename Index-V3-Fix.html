@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>FaceTrack V3</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00D9FF">
+<script src="https://cdn.jsdelivr.net/npm/human@3.2.1/dist/human.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui}
+body{background:#0a0a0f;color:#fff;min-height:100vh;display:flex;flex-direction:column}
+header{padding:16px 20px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:900;letter-spacing:-1px;font-size:22px} .logo span{color:#00D9FF}
+#status{font-size:12px;background:#1a1a25;padding:6px 12px;border-radius:20px;color:#aaa}
+#main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:16px}
+.brain{font-size:56px;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+#log{background:#15151f;border:1px solid #222;border-radius:16px;padding:12px 16px;font-size:13px;width:100%;max-width:500px;color:#aaa;min-height:44px}
+#progressWrap{width:100%;max-width:500px;height:8px;background:#1a1a25;border-radius:10px;overflow:hidden;display:none}
+#progressBar{height:100%;width:0%;background:#00D9FF;transition:width .3s}
+#videoWrap{position:relative;width:100%;max-width:500px;aspect-ratio:3/4;background:#000;border-radius:24px;overflow:hidden;display:none}
+#video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.card{width:100%;max-width:500px;background:#15151f;border:1px solid #222;border-radius:20px;padding:16px;display:none;gap:12px}
+.card.show{display:flex;flex-direction:column}
+.row{display:flex;justify-content:space-between}
+.controls{padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:500px;margin:0 auto;width:100%}
+.btn{border:0;border-radius:20px;padding:16px;font-weight:800;font-size:16px;cursor:pointer}
+.btn-primary{background:#00D9FF;color:#000}
+.btn-ghost{background:#1a1a25;color:#fff;border:1px solid #2a2a3a}
+.btn-full{grid-column:1/-1}
+#retryBtn{display:none;margin-top:8px}
+</style>
+</head>
+<body>
+<header><div class="logo">FACE<span>TRACK</span> V3</div><div id="status">Iniciando...</div></header>
+<div id="main">
+<div id="log">Preparando...</div>
+<div id="progressWrap"><div id="progressBar"></div></div>
+<div id="brainBox" style="text-align:center">
+<div class="brain">🧠</div>
+<h2 id="title">IA V3 carregando...</h2>
+<p id="subtitle" style="color:#777;font-size:14px;margin-top:8px">Primeira vez baixa ~12MB, depois fica offline</p>
+<button id="retryBtn" class="btn btn-ghost" onclick="location.reload()">🔄 Tentar novamente (use WiFi)</button>
+</div>
+<div id="videoWrap"><video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas></div>
+<div id="card" class="card">
+<div class="row"><span>Idade</span><b id="age">-</b></div>
+<div class="row"><span>Gênero</span><b id="gender">-</b></div>
+<div class="row"><span>Confiança</span><b id="conf">-</b></div>
+<div class="row"><span>Emoção</span><b id="emo">-</b></div>
+</div>
+</div>
+<div class="controls">
+<button class="btn btn-primary" id="startBtn">▶ INICIAR</button>
+<button class="btn btn-ghost" id="flipBtn">🔄 Virar</button>
+<button class="btn btn-ghost btn-full" id="galleryBtn">🖼️ Analisar foto da galeria (privado)</button>
+<input type="file" id="fileInput" accept="image/*" style="display:none">
+</div>
+<script>
+const $ = s=>document.getElementById(s);
+const log = m=>{$('log').textContent=m; console.log(m);}
+const status = m=>{$('status').textContent=m;}
+let human, facing='user', stream;
+
+const config = {
+  backend:'webgl',
+  modelBasePath:'https://cdn.jsdelivr.net/npm/@vladmandic/human@3.2.1/models/',
+  filter:{enabled:true,equalization:false},
+  face:{
+    enabled:true,
+    detector:{rotation:true,maxDetected:1},
+    mesh:{enabled:true},
+    attention:{enabled:false},
+    iris:{enabled:false},
+    description:{enabled:true},
+    emotion:{enabled:true},
+    age:{enabled:true},
+    gender:{enabled:true},
+    antispoof:{enabled:false},
+    liveness:{enabled:false}
+  },
+  body:{enabled:false},
+  hand:{enabled:false},
+  object:{enabled:false}
+};
+
+async function init(){
+  try{
+    log('Carregando engine Human 3.2.1...');
+    status('Baixando IA...');
+    $('progressWrap').style.display='block';
+    $('progressBar').style.width='20%';
+    human = new Human.Human(config);
+    $('progressBar').style.width='50%';
+    log('Baixando modelos ~12MB... mantenha o WiFi ligado');
+    status('Baixando modelos...');
+    await human.load();
+    $('progressBar').style.width='90%';
+    await human.warmup();
+    $('progressBar').style.width='100%';
+    log('✅ V3 Pronto! Clique em INICIAR');
+    status('✅ Pronto');
+    $('title').textContent='IA Pronta! Offline';
+    $('subtitle').textContent='Clique em INICIAR';
+    $('progressWrap').style.display='none';
+    $('retryBtn').style.display='none';
+  }catch(e){
+    console.error(e);
+    log('❌ Erro: '+e.message+' - Tente no WiFi e recarregue');
+    status('Erro no download');
+    $('title').textContent='Falha no download';
+    $('subtitle').textContent='Use WiFi, o modelo tem 12MB. Clique em tentar novamente.';
+    $('retryBtn').style.display='block';
+    $('progressWrap').style.display='none';
+  }
+}
+
+async function startCam(){
+  try{
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    $('videoWrap').style.display='block';
+    $('card').classList.add('show');
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:720},height:{ideal:1280}},audio:false});
+    $('video').srcObject=stream;
+    await $('video').play();
+    detectLoop();
+  }catch(e){ log('Erro câmera: '+e.message); }
+}
+
+async function detectLoop(){
+  if(!$('video').srcObject) return;
+  const result = await human.detect($('video'));
+  const canvas = $('canvas');
+  canvas.width=$('video').videoWidth; canvas.height=$('video').videoHeight;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(result.face && result.face.length>0){
+    human.draw.face(canvas,result.face);
+    const f=result.face[0];
+    $('age').textContent = f.age ? Math.round(f.age)+' anos' : '-';
+    $('gender').textContent = f.gender ? (f.gender.charAt(0).toUpperCase()+f.gender.slice(1)) + ' ('+Math.round(f.genderScore*100)+'%)' : '-';
+    $('conf').textContent = f.faceScore ? Math.round(f.faceScore*100)+'%' : '-';
+    $('emo').textContent = f.emotion ? f.emotion[0].emotion+' '+Math.round(f.emotion[0].score*100)+'%' : '-';
+  }
+  requestAnimationFrame(detectLoop);
+}
+
+$('startBtn').onclick = async()=>{ if(!human || !human.models) await init(); await startCam(); };
+$('flipBtn').onclick = ()=>{ facing=facing==='user'?'environment':'user'; if(stream) startCam(); };
+$('galleryBtn').onclick=()=>$('fileInput').click();
+$('fileInput').onchange=async(e)=>{
+  const file=e.target.files[0]; if(!file) return;
+  const img=new Image(); img.src=URL.createObjectURL(file);
+  await img.decode();
+  $('videoWrap').style.display='none';
+  $('card').classList.add('show');
+  const res=await human.detect(img);
+  if(res.face && res.face[0]){
+    const f=res.face[0];
+    $('age').textContent=Math.round(f.age)+' anos';
+    $('gender').textContent=f.gender;
+    $('conf').textContent=Math.round(f.faceScore*100)+'%';
+    $('emo').textContent=f.emotion[0].emotion;
+    log('Foto analisada offline!');
+  } else log('Nenhum rosto encontrado');
+};
+
+init();
+</script>
+</body>
+</html>
